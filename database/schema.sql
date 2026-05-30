@@ -15,7 +15,18 @@ CREATE TABLE IF NOT EXISTS students (
   full_name text NOT NULL,
   email text,
   phone text,
+  age integer,
+  student_type text,
+  institution_name text,
+  company_name text,
   active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS classes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL UNIQUE,
+  order_index integer NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -23,6 +34,7 @@ CREATE TABLE IF NOT EXISTS class_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   class_date date NOT NULL UNIQUE,
   day_of_week text NOT NULL,
+  class_id uuid REFERENCES classes(id),
   created_by uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );

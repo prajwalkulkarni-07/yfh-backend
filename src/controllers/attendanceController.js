@@ -11,9 +11,66 @@ const dayNames = [
   "Saturday",
 ];
 
+const CLASS_ROTATION_START = "2026-05-31";
+const CLASS_ROTATION_START_INDEX = 6;
+const CLASS_ROTATION = [
+  "Self Management",
+  "Yoga",
+  "Relationship",
+  "Karma",
+  "Diet For Happiness",
+  "Habits For Happiness",
+  "The Perfect Knowledge",
+  "The Real Freedom",
+];
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 const getDayOfWeek = (classDate) => {
   const date = new Date(`${classDate}T00:00:00Z`);
   return dayNames[date.getUTCDay()];
+};
+
+const parseDate = (value) => {
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getClassNameForDate = (classDate) => {
+  const date = parseDate(classDate);
+  if (!date || date.getUTCDay() !== 0) return null;
+  const start = parseDate(CLASS_ROTATION_START);
+  if (!start) return null;
+  const diffDays = Math.floor((date - start) / MS_PER_DAY);
+  if (diffDays % 7 !== 0) return null;
+  const weeksOffset = diffDays / 7;
+  const index =
+    ((weeksOffset + CLASS_ROTATION_START_INDEX) % CLASS_ROTATION.length +
+      CLASS_ROTATION.length) %
+    CLASS_ROTATION.length;
+  return CLASS_ROTATION[index];
+};
+
+const ensureClasses = async (client) => {
+  for (let i = 0; i < CLASS_ROTATION.length; i += 1) {
+    await client.query(
+      `INSERT INTO classes (name, order_index)
+       VALUES ($1, $2)
+       ON CONFLICT (name)
+       DO UPDATE SET order_index = EXCLUDED.order_index`,
+      [CLASS_ROTATION[i], i + 1]
+    );
+  }
+};
+
+const getClassIdForDate = async (client, classDate) => {
+  const className = getClassNameForDate(classDate);
+  if (!className) return null;
+  await ensureClasses(client);
+  const result = await client.query(
+    "SELECT id FROM classes WHERE name = $1",
+    [className]
+  );
+  return result.rows[0]?.id ?? null;
 };
 
 export const createSession = async (req, res) => {
@@ -25,14 +82,16 @@ export const createSession = async (req, res) => {
     }
 
     const dayOfWeek = getDayOfWeek(class_date);
+    const classId = await getClassIdForDate(pool, class_date);
 
     const result = await pool.query(
-      `INSERT INTO class_sessions (class_date, day_of_week, created_by)
-       VALUES ($1, $2, $3)
+      `INSERT INTO class_sessions (class_date, day_of_week, class_id, created_by)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (class_date)
-       DO UPDATE SET day_of_week = EXCLUDED.day_of_week
+       DO UPDATE SET day_of_week = EXCLUDED.day_of_week,
+                     class_id = EXCLUDED.class_id
        RETURNING *`,
-      [class_date, dayOfWeek, req.user.id]
+      [class_date, dayOfWeek, classId, req.user.id]
     );
 
     successResponse(res, result.rows[0], "Session created successfully", 201);
@@ -59,10 +118,12 @@ export const getSessions = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, class_date, day_of_week, created_by, created_at
-       FROM class_sessions
+      `SELECT s.id, s.class_date, s.day_of_week, s.created_by, s.created_at,
+              c.id as class_id, c.name as class_name
+       FROM class_sessions s
+       LEFT JOIN classes c ON c.id = s.class_id
        WHERE ${where}
-       ORDER BY class_date DESC`,
+       ORDER BY s.class_date DESC`,
       params
     );
 
@@ -85,18 +146,21 @@ export const markAttendance = async (req, res) => {
     await client.query("BEGIN");
 
     const dayOfWeek = getDayOfWeek(class_date);
+    const classId = await getClassIdForDate(client, class_date);
     const sessionResult = await client.query(
-      `INSERT INTO class_sessions (class_date, day_of_week, created_by)
-       VALUES ($1, $2, $3)
+      `INSERT INTO class_sessions (class_date, day_of_week, class_id, created_by)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (class_date)
-       DO UPDATE SET day_of_week = EXCLUDED.day_of_week
+       DO UPDATE SET day_of_week = EXCLUDED.day_of_week,
+                     class_id = EXCLUDED.class_id
        RETURNING id`,
-      [class_date, dayOfWeek, req.user.id]
+      [class_date, dayOfWeek, classId, req.user.id]
     );
 
     const sessionId = sessionResult.rows[0].id;
     const inserted = [];
     const studentIds = [];
+    const presentStudentIds = [];
 
     for (const record of records) {
       const { student_id, status } = record;
@@ -122,30 +186,89 @@ export const markAttendance = async (req, res) => {
 
       inserted.push(result.rows[0]);
       studentIds.push(student_id);
+      if (status === "present") {
+        presentStudentIds.push(student_id);
+      }
+    }
+
+    if (presentStudentIds.length > 0) {
+      await client.query(
+        `UPDATE students
+         SET active = true
+         WHERE id = ANY($1::uuid[])
+           AND active = false`,
+        [presentStudentIds]
+      );
     }
 
     if (studentIds.length > 0) {
       await client.query(
-        `WITH recent AS (
-           SELECT a.student_id, a.status,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY a.student_id
-                    ORDER BY s.class_date DESC
-                  ) AS rn
+        `WITH attended AS (
+           SELECT a.student_id, c.order_index
            FROM attendance a
            INNER JOIN class_sessions s ON s.id = a.session_id
-           WHERE a.student_id = ANY($1::uuid[])
+           INNER JOIN classes c ON c.id = s.class_id
+           WHERE a.status = 'present'
+             AND a.student_id = ANY($1::uuid[])
+           GROUP BY a.student_id, c.order_index
          ),
-         to_deactivate AS (
-           SELECT student_id
-           FROM recent
-           WHERE rn <= 2
+         all_classes AS (
+           SELECT order_index
+           FROM classes
+         ),
+         missing AS (
+           SELECT st.id as student_id, ac.order_index
+           FROM students st
+           CROSS JOIN all_classes ac
+           LEFT JOIN attended a
+             ON a.student_id = st.id
+            AND a.order_index = ac.order_index
+           WHERE st.id = ANY($1::uuid[])
+             AND a.order_index IS NULL
+         ),
+         next_required AS (
+           SELECT student_id, MIN(order_index) as order_index
+           FROM missing
            GROUP BY student_id
-           HAVING COUNT(*) = 2 AND BOOL_AND(status = 'absent')
+         ),
+         completed AS (
+           SELECT st.id as student_id
+           FROM students st
+           LEFT JOIN attended a ON a.student_id = st.id
+           WHERE st.id = ANY($1::uuid[])
+           GROUP BY st.id
+           HAVING COUNT(a.order_index) = (SELECT COUNT(*) FROM classes)
+         ),
+         target AS (
+           SELECT nr.student_id, nr.order_index
+           FROM next_required nr
+           LEFT JOIN completed c ON c.student_id = nr.student_id
+           WHERE c.student_id IS NULL
+         ),
+         last_two_sessions AS (
+           SELECT t.student_id, s.id as session_id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY t.student_id
+                    ORDER BY s.class_date DESC
+                  ) AS rn
+           FROM target t
+           INNER JOIN classes c ON c.order_index = t.order_index
+           INNER JOIN class_sessions s ON s.class_id = c.id
+         ),
+         eligible AS (
+           SELECT lts.student_id
+           FROM last_two_sessions lts
+           LEFT JOIN attendance a
+             ON a.session_id = lts.session_id
+            AND a.student_id = lts.student_id
+            AND a.status = 'present'
+           WHERE lts.rn <= 2
+           GROUP BY lts.student_id
+           HAVING COUNT(*) = 2 AND COUNT(a.session_id) = 0
          )
          UPDATE students
          SET active = false
-         WHERE id IN (SELECT student_id FROM to_deactivate)
+         WHERE id IN (SELECT student_id FROM eligible)
            AND active = true`,
         [studentIds]
       );

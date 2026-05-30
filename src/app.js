@@ -5,6 +5,7 @@ import pool from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import studentsRoutes from "./routes/studentsRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import reportsRoutes from "./routes/reportsRoutes.js";
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.get("/test-db", async (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentsRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/reports", reportsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

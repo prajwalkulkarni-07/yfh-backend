@@ -3,7 +3,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "create-admin": "node create-admin.js"
+    "create-admin": "node create-admin.js",
+    "seed-data": "node seed-data.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

@@ -3,6 +3,7 @@ import {
   createStudent,
   getStudents,
   getStudentById,
+  getStudentDetails,
   updateStudent,
   setStudentStatus,
 } from "../controllers/studentsController.js";
@@ -15,6 +16,7 @@ router.use(authorize("admin"));
 
 router.post("/", createStudent);
 router.get("/", getStudents);
+router.get("/:id/details", getStudentDetails);
 router.get("/:id", getStudentById);
 router.put("/:id", updateStudent);
 router.patch("/:id/status", setStudentStatus);
