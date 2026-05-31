@@ -118,7 +118,7 @@ export const getSessions = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT s.id, s.class_date, s.day_of_week, s.created_by, s.created_at,
+      `SELECT s.id, s.class_date::text as class_date, s.day_of_week, s.created_by, s.created_at,
               c.id as class_id, c.name as class_name
        FROM class_sessions s
        LEFT JOIN classes c ON c.id = s.class_id
@@ -312,8 +312,8 @@ export const getAttendance = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT a.id, a.status, a.marked_at,
-              s.id as session_id, s.class_date, s.day_of_week,
+          `SELECT a.id, a.status, a.marked_at,
+            s.id as session_id, s.class_date::text as class_date, s.day_of_week,
               st.id as student_id, st.full_name as student_name,
               u.name as marked_by_name
        FROM attendance a

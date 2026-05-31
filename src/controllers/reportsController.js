@@ -9,7 +9,7 @@ export const getInactiveReport = async (_req, res) => {
     const result = await pool.query(
       `WITH last_attendance AS (
          SELECT a.student_id,
-                s.class_date,
+            s.class_date::text as class_date,
                 c.name as class_name,
                 ROW_NUMBER() OVER (
                   PARTITION BY a.student_id
@@ -95,7 +95,7 @@ export const getPromotedReport = async (_req, res) => {
               st.full_name,
               st.phone,
               st.promoted_at,
-              lt.trip_date
+              lt.trip_date::text as trip_date
        FROM students st
        LEFT JOIN last_trip lt ON lt.student_id = st.id
        WHERE st.level >= 2

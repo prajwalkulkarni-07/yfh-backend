@@ -44,6 +44,15 @@ export const createStudent = async (req, res) => {
       return errorResponse(res, "phone is required", 400);
     }
 
+    const phoneValue = String(phone).trim();
+    const existing = await pool.query(
+      "SELECT 1 FROM students WHERE phone = $1 LIMIT 1",
+      [phoneValue]
+    );
+    if (existing.rows.length > 0) {
+      return errorResponse(res, "Student with this phone number already exists", 409);
+    }
+
     const parsedAge = Number(age);
     if (!Number.isFinite(parsedAge) || parsedAge <= 0) {
       return errorResponse(res, "age must be a positive number", 400);
@@ -67,7 +76,7 @@ export const createStudent = async (req, res) => {
        RETURNING *`,
       [
         full_name.trim(),
-        phone.trim(),
+        phoneValue,
         parsedAge,
         student_type,
         student_type === "studying" ? String(institution_name).trim() : null,
@@ -152,6 +161,17 @@ export const updateStudent = async (req, res) => {
 
     if (phone !== undefined && String(phone).trim() === "") {
       return errorResponse(res, "phone is required", 400);
+    }
+
+    if (phone !== undefined) {
+      const phoneValue = String(phone).trim();
+      const existing = await pool.query(
+        "SELECT 1 FROM students WHERE phone = $1 AND id <> $2 LIMIT 1",
+        [phoneValue, id]
+      );
+      if (existing.rows.length > 0) {
+        return errorResponse(res, "Student with this phone number already exists", 409);
+      }
     }
 
     const parsedAge = age !== undefined ? Number(age) : undefined;
@@ -294,8 +314,8 @@ export const getStudentDetails = async (req, res) => {
       `SELECT c.id as class_id,
               c.name as class_name,
               c.order_index,
-              CASE WHEN MAX(a.marked_at) IS NULL THEN 'absent' ELSE 'present' END as status,
-              MAX(a.marked_at)::date as attended_on
+              CASE WHEN COUNT(a.id) = 0 THEN 'absent' ELSE 'present' END as status,
+              MAX(s.class_date)::text as attended_on
        FROM classes c
        LEFT JOIN class_sessions s ON s.class_id = c.id
        LEFT JOIN attendance a
@@ -308,22 +328,54 @@ export const getStudentDetails = async (req, res) => {
     );
 
     const tripResult = await pool.query(
-      `SELECT MAX(t.trip_date) as last_trip_date,
-              COUNT(*) FILTER (WHERE t.trip_date < CURRENT_DATE) > 0 as has_attended_trip
-       FROM trip_participants tp
-       INNER JOIN trips t ON t.id = tp.trip_id
-       WHERE tp.student_id = $1`,
+      `WITH student_trips AS (
+         SELECT t.trip_date::text as trip_date, t.details
+         FROM trips t
+         INNER JOIN trip_participants tp ON tp.trip_id = t.id
+         WHERE tp.student_id = $1
+       ),
+       attended AS (
+         SELECT trip_date, details
+         FROM student_trips
+         WHERE trip_date < CURRENT_DATE
+         ORDER BY trip_date DESC
+         LIMIT 1
+       ),
+       upcoming AS (
+         SELECT trip_date, details
+         FROM student_trips
+         WHERE trip_date >= CURRENT_DATE
+         ORDER BY trip_date ASC
+         LIMIT 1
+       )
+      SELECT (SELECT trip_date FROM attended) as last_attended_trip_date,
+              (SELECT details FROM attended) as last_attended_trip_details,
+              (SELECT trip_date FROM upcoming) as next_trip_date,
+              (SELECT details FROM upcoming) as next_trip_details,
+              EXISTS (SELECT 1 FROM attended) as has_attended_trip,
+              EXISTS (SELECT 1 FROM upcoming) as has_upcoming_trip`,
       [id]
     );
 
-    const tripInfo = tripResult.rows[0] ?? { last_trip_date: null, has_attended_trip: false };
+    const tripInfo = tripResult.rows[0] ?? {
+      last_attended_trip_date: null,
+      last_attended_trip_details: null,
+      next_trip_date: null,
+      next_trip_details: null,
+      has_attended_trip: false,
+      has_upcoming_trip: false,
+    };
 
     successResponse(res, {
       student: studentResult.rows[0],
       sessions: sessionsResult.rows,
       trip_info: {
-        last_trip_date: tripInfo.last_trip_date,
+        last_attended_trip_date: tripInfo.last_attended_trip_date,
+        last_attended_trip_details: tripInfo.last_attended_trip_details,
+        next_trip_date: tripInfo.next_trip_date,
+        next_trip_details: tripInfo.next_trip_details,
         has_attended_trip: Boolean(tripInfo.has_attended_trip),
+        has_upcoming_trip: Boolean(tripInfo.has_upcoming_trip),
       },
     }, "Student details fetched successfully");
   } catch (error) {

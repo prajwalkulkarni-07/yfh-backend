@@ -35,7 +35,7 @@ export const listTrips = async (_req, res) => {
 
     const result = await pool.query(
             `SELECT t.id,
-              t.trip_date,
+              t.trip_date::text as trip_date,
               t.details,
               t.created_at,
               COUNT(tp.student_id) as participant_count,
@@ -90,7 +90,7 @@ export const createTrip = async (req, res) => {
     const tripResult = await client.query(
       `INSERT INTO trips (trip_date, details, created_by)
        VALUES ($1, $2, $3)
-       RETURNING id, trip_date, details, created_at`,
+       RETURNING id, trip_date::text as trip_date, details, created_at`,
       [parsedDate, tripDetails || null, req.user.id]
     );
 
@@ -141,7 +141,7 @@ export const updateTripParticipants = async (req, res) => {
     await client.query("BEGIN");
 
     const tripResult = await client.query(
-      "SELECT id, trip_date FROM trips WHERE id = $1",
+      "SELECT id, trip_date::text as trip_date FROM trips WHERE id = $1",
       [id]
     );
 
@@ -207,7 +207,7 @@ export const deleteTrip = async (req, res) => {
     await client.query("BEGIN");
 
     const tripResult = await client.query(
-      "SELECT id, trip_date FROM trips WHERE id = $1",
+      "SELECT id, trip_date::text as trip_date FROM trips WHERE id = $1",
       [id]
     );
 
