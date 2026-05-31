@@ -6,6 +6,7 @@ import {
   getStudentDetails,
   updateStudent,
   setStudentStatus,
+  deleteStudent,
 } from "../controllers/studentsController.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 
@@ -20,5 +21,6 @@ router.get("/:id/details", getStudentDetails);
 router.get("/:id", getStudentById);
 router.put("/:id", updateStudent);
 router.patch("/:id/status", setStudentStatus);
+router.delete("/:id", deleteStudent);
 
 export default router;

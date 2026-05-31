@@ -196,7 +196,8 @@ export const markAttendance = async (req, res) => {
         `UPDATE students
          SET active = true
          WHERE id = ANY($1::uuid[])
-           AND active = false`,
+           AND active = false
+           AND level = 1`,
         [presentStudentIds]
       );
     }
@@ -224,6 +225,7 @@ export const markAttendance = async (req, res) => {
              ON a.student_id = st.id
             AND a.order_index = ac.order_index
            WHERE st.id = ANY($1::uuid[])
+             AND st.level = 1
              AND a.order_index IS NULL
          ),
          next_required AS (
@@ -236,6 +238,7 @@ export const markAttendance = async (req, res) => {
            FROM students st
            LEFT JOIN attended a ON a.student_id = st.id
            WHERE st.id = ANY($1::uuid[])
+             AND st.level = 1
            GROUP BY st.id
            HAVING COUNT(a.order_index) = (SELECT COUNT(*) FROM classes)
          ),
@@ -269,7 +272,8 @@ export const markAttendance = async (req, res) => {
          UPDATE students
          SET active = false
          WHERE id IN (SELECT student_id FROM eligible)
-           AND active = true`,
+           AND active = true
+           AND level = 1`,
         [studentIds]
       );
     }
@@ -364,6 +368,7 @@ export const getSummary = async (req, res) => {
        LEFT JOIN attendance a
          ON st.id = a.student_id
         AND a.session_id IN (SELECT id FROM filtered_sessions)
+       WHERE st.level = 1
        GROUP BY st.id, st.full_name
        ORDER BY st.full_name ASC`,
       params

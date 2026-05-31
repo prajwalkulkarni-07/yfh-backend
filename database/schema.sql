@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS students (
   institution_name text,
   company_name text,
   active boolean NOT NULL DEFAULT true,
+  level integer NOT NULL DEFAULT 1,
+  promoted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -49,5 +51,21 @@ CREATE TABLE IF NOT EXISTS attendance (
   UNIQUE (session_id, student_id)
 );
 
+CREATE TABLE IF NOT EXISTS trips (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_date date NOT NULL UNIQUE,
+  details text,
+  created_by uuid REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS trip_participants (
+  trip_id uuid NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  student_id uuid NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  added_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (trip_id, student_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_attendance_session ON attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_student ON attendance(student_id);
+CREATE INDEX IF NOT EXISTS idx_trip_participants_student ON trip_participants(student_id);

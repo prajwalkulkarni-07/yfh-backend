@@ -6,6 +6,7 @@ import authRoutes from "./routes/authRoutes.js";
 import studentsRoutes from "./routes/studentsRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import reportsRoutes from "./routes/reportsRoutes.js";
+import tripsRoutes from "./routes/tripsRoutes.js";
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/students", studentsRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/trips", tripsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

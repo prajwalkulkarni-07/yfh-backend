@@ -1,5 +1,6 @@
 import pool from "../config/db.js";
 import { successResponse, errorResponse } from "../utils/response.js";
+import { promoteEligibleStudents } from "../utils/promotions.js";
 
 const CLASS_ROTATION = [
   "Self Management",
@@ -83,7 +84,9 @@ export const createStudent = async (req, res) => {
 
 export const getStudents = async (req, res) => {
   try {
-    const { active } = req.query;
+    const { active, include_promoted } = req.query;
+
+    await promoteEligibleStudents(pool);
 
     const params = [];
     let where = "1=1";
@@ -93,8 +96,13 @@ export const getStudents = async (req, res) => {
       where += ` AND active = $${params.length}`;
     }
 
+    if (include_promoted !== "true") {
+      where += " AND level = 1";
+    }
+
     const result = await pool.query(
-      `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name, active, created_at
+      `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
+              active, level, promoted_at, created_at
        FROM students
        WHERE ${where}
        ORDER BY created_at DESC`,
@@ -114,7 +122,7 @@ export const getStudentById = async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
-              active, created_at
+              active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]
     );
@@ -186,7 +194,8 @@ export const updateStudent = async (req, res) => {
              ELSE COALESCE($6, company_name)
            END
        WHERE id = $7
-       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name, active, created_at`,
+       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name,
+                 active, level, promoted_at, created_at`,
       [full_name, phone, parsedAge, student_type, institution_name, company_name, id]
     );
 
@@ -212,7 +221,8 @@ export const setStudentStatus = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE students SET active = $1 WHERE id = $2
-       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name, active, created_at`,
+       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name,
+                 active, level, promoted_at, created_at`,
       [Boolean(active), id]
     );
 
@@ -227,13 +237,50 @@ export const setStudentStatus = async (req, res) => {
   }
 };
 
+export const deleteStudent = async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const attendanceResult = await client.query(
+      "DELETE FROM attendance WHERE student_id = $1",
+      [id]
+    );
+
+    const studentResult = await client.query(
+      "DELETE FROM students WHERE id = $1 RETURNING id",
+      [id]
+    );
+
+    if (studentResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return errorResponse(res, "Student not found", 404);
+    }
+
+    await client.query("COMMIT");
+    successResponse(
+      res,
+      { id, attendance_removed: attendanceResult.rowCount },
+      "Student deleted successfully"
+    );
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Delete student error:", error);
+    errorResponse(res, "Failed to delete student", 500);
+  } finally {
+    client.release();
+  }
+};
+
 export const getStudentDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
     const studentResult = await pool.query(
       `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
-              active, created_at
+              active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]
     );
@@ -260,9 +307,24 @@ export const getStudentDetails = async (req, res) => {
       [id]
     );
 
+    const tripResult = await pool.query(
+      `SELECT MAX(t.trip_date) as last_trip_date,
+              COUNT(*) FILTER (WHERE t.trip_date < CURRENT_DATE) > 0 as has_attended_trip
+       FROM trip_participants tp
+       INNER JOIN trips t ON t.id = tp.trip_id
+       WHERE tp.student_id = $1`,
+      [id]
+    );
+
+    const tripInfo = tripResult.rows[0] ?? { last_trip_date: null, has_attended_trip: false };
+
     successResponse(res, {
       student: studentResult.rows[0],
       sessions: sessionsResult.rows,
+      trip_info: {
+        last_trip_date: tripInfo.last_trip_date,
+        has_attended_trip: Boolean(tripInfo.has_attended_trip),
+      },
     }, "Student details fetched successfully");
   } catch (error) {
     console.error("Get student details error:", error);
