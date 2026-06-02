@@ -329,7 +329,7 @@ export const getStudentDetails = async (req, res) => {
 
     const tripResult = await pool.query(
       `WITH student_trips AS (
-         SELECT t.trip_date::text as trip_date, t.details
+         SELECT t.trip_date, t.details
          FROM trips t
          INNER JOIN trip_participants tp ON tp.trip_id = t.id
          WHERE tp.student_id = $1
