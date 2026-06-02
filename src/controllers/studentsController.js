@@ -32,8 +32,12 @@ export const createStudent = async (req, res) => {
       phone,
       age,
       student_type,
-      institution_name,
+      college_name,
+      branch,
+      semester,
       company_name,
+      designation,
+      experience,
     } = req.body;
 
     if (!full_name || String(full_name).trim() === "") {
@@ -62,25 +66,59 @@ export const createStudent = async (req, res) => {
       return errorResponse(res, "student_type must be 'studying' or 'working'", 400);
     }
 
-    if (student_type === "studying" && (!institution_name || String(institution_name).trim() === "")) {
-      return errorResponse(res, "institution_name is required for studying", 400);
+    const parsedSemester = semester !== undefined ? Number(semester) : undefined;
+    const parsedExperience = experience !== undefined ? Number(experience) : undefined;
+
+    if (student_type === "studying") {
+      if (!college_name || String(college_name).trim() === "") {
+        return errorResponse(res, "college_name is required for studying", 400);
+      }
+      if (!branch || String(branch).trim() === "") {
+        return errorResponse(res, "branch is required for studying", 400);
+      }
+      if (!Number.isFinite(parsedSemester) || parsedSemester <= 0) {
+        return errorResponse(res, "semester must be a positive number", 400);
+      }
     }
 
-    if (student_type === "working" && (!company_name || String(company_name).trim() === "")) {
-      return errorResponse(res, "company_name is required for working", 400);
+    if (student_type === "working") {
+      if (!company_name || String(company_name).trim() === "") {
+        return errorResponse(res, "company_name is required for working", 400);
+      }
+      if (!designation || String(designation).trim() === "") {
+        return errorResponse(res, "designation is required for working", 400);
+      }
+      if (!Number.isFinite(parsedExperience) || parsedExperience < 0) {
+        return errorResponse(res, "experience must be a non-negative number", 400);
+      }
     }
 
     const result = await pool.query(
-      `INSERT INTO students (full_name, phone, age, student_type, institution_name, company_name)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO students (
+         full_name,
+         phone,
+         age,
+         student_type,
+         college_name,
+         branch,
+         semester,
+         company_name,
+         designation,
+         experience
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         full_name.trim(),
         phoneValue,
         parsedAge,
         student_type,
-        student_type === "studying" ? String(institution_name).trim() : null,
+        student_type === "studying" ? String(college_name).trim() : null,
+        student_type === "studying" ? String(branch).trim() : null,
+        student_type === "studying" ? parsedSemester : null,
         student_type === "working" ? String(company_name).trim() : null,
+        student_type === "working" ? String(designation).trim() : null,
+        student_type === "working" ? parsedExperience : null,
       ]
     );
 
@@ -110,7 +148,8 @@ export const getStudents = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
+          `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
+            company_name, designation, experience,
               active, level, promoted_at, created_at
        FROM students
        WHERE ${where}
@@ -130,7 +169,8 @@ export const getStudentById = async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
+          `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
+            company_name, designation, experience,
               active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]
@@ -155,8 +195,12 @@ export const updateStudent = async (req, res) => {
       phone,
       age,
       student_type,
-      institution_name,
+      college_name,
+      branch,
+      semester,
       company_name,
+      designation,
+      experience,
     } = req.body;
 
     if (phone !== undefined && String(phone).trim() === "") {
@@ -185,16 +229,35 @@ export const updateStudent = async (req, res) => {
       return errorResponse(res, "student_type must be 'studying' or 'working'", 400);
     }
 
-    if ((institution_name !== undefined || company_name !== undefined) && !student_type) {
-      return errorResponse(res, "student_type is required when updating institution or company", 400);
+    const parsedSemester = semester !== undefined ? Number(semester) : undefined;
+    const parsedExperience = experience !== undefined ? Number(experience) : undefined;
+
+    if ((college_name !== undefined || branch !== undefined || semester !== undefined || company_name !== undefined || designation !== undefined || experience !== undefined) && !student_type) {
+      return errorResponse(res, "student_type is required when updating profile details", 400);
     }
 
-    if (student_type === "studying" && (!institution_name || String(institution_name).trim() === "")) {
-      return errorResponse(res, "institution_name is required for studying", 400);
+    if (student_type === "studying") {
+      if (college_name !== undefined && String(college_name).trim() === "") {
+        return errorResponse(res, "college_name is required for studying", 400);
+      }
+      if (branch !== undefined && String(branch).trim() === "") {
+        return errorResponse(res, "branch is required for studying", 400);
+      }
+      if (semester !== undefined && (!Number.isFinite(parsedSemester) || parsedSemester <= 0)) {
+        return errorResponse(res, "semester must be a positive number", 400);
+      }
     }
 
-    if (student_type === "working" && (!company_name || String(company_name).trim() === "")) {
-      return errorResponse(res, "company_name is required for working", 400);
+    if (student_type === "working") {
+      if (company_name !== undefined && String(company_name).trim() === "") {
+        return errorResponse(res, "company_name is required for working", 400);
+      }
+      if (designation !== undefined && String(designation).trim() === "") {
+        return errorResponse(res, "designation is required for working", 400);
+      }
+      if (experience !== undefined && (!Number.isFinite(parsedExperience) || parsedExperience < 0)) {
+        return errorResponse(res, "experience must be a non-negative number", 400);
+      }
     }
 
     const result = await pool.query(
@@ -203,20 +266,53 @@ export const updateStudent = async (req, res) => {
            phone = COALESCE($2, phone),
            age = COALESCE($3, age),
            student_type = COALESCE($4, student_type),
-           institution_name = CASE
+           college_name = CASE
              WHEN $4 = 'studying' THEN $5
              WHEN $4 = 'working' THEN NULL
-             ELSE COALESCE($5, institution_name)
+             ELSE COALESCE($5, college_name)
+           END,
+           branch = CASE
+             WHEN $4 = 'studying' THEN $6
+             WHEN $4 = 'working' THEN NULL
+             ELSE COALESCE($6, branch)
+           END,
+           semester = CASE
+             WHEN $4 = 'studying' THEN $7
+             WHEN $4 = 'working' THEN NULL
+             ELSE COALESCE($7, semester)
            END,
            company_name = CASE
-             WHEN $4 = 'working' THEN $6
+             WHEN $4 = 'working' THEN $8
              WHEN $4 = 'studying' THEN NULL
-             ELSE COALESCE($6, company_name)
+             ELSE COALESCE($8, company_name)
+           END,
+           designation = CASE
+             WHEN $4 = 'working' THEN $9
+             WHEN $4 = 'studying' THEN NULL
+             ELSE COALESCE($9, designation)
+           END,
+           experience = CASE
+             WHEN $4 = 'working' THEN $10
+             WHEN $4 = 'studying' THEN NULL
+             ELSE COALESCE($10, experience)
            END
-       WHERE id = $7
-       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name,
+       WHERE id = $11
+       RETURNING id, full_name, email, phone, age, student_type, college_name, branch, semester,
+                 company_name, designation, experience,
                  active, level, promoted_at, created_at`,
-      [full_name, phone, parsedAge, student_type, institution_name, company_name, id]
+      [
+        full_name,
+        phone,
+        parsedAge,
+        student_type,
+        college_name,
+        branch,
+        parsedSemester,
+        company_name,
+        designation,
+        parsedExperience,
+        id,
+      ]
     );
 
     if (result.rows.length === 0) {
@@ -241,7 +337,8 @@ export const setStudentStatus = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE students SET active = $1 WHERE id = $2
-       RETURNING id, full_name, email, phone, age, student_type, institution_name, company_name,
+       RETURNING id, full_name, email, phone, age, student_type, college_name, branch, semester,
+                 company_name, designation, experience,
                  active, level, promoted_at, created_at`,
       [Boolean(active), id]
     );
@@ -299,7 +396,8 @@ export const getStudentDetails = async (req, res) => {
     const { id } = req.params;
 
     const studentResult = await pool.query(
-      `SELECT id, full_name, email, phone, age, student_type, institution_name, company_name,
+          `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
+            company_name, designation, experience,
               active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]

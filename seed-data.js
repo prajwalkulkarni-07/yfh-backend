@@ -1,10 +1,8 @@
-import dotenv from "dotenv";
-import pool from "./src/config/db.js";
+import dotenv from "dotenv"
+import pool from "./src/config/db.js"
 
-dotenv.config();
+dotenv.config()
 
-const CLASS_ROTATION_START = "2026-05-31";
-const CLASS_ROTATION_START_INDEX = 6;
 const CLASS_ROTATION = [
   "Self Management",
   "Yoga",
@@ -14,191 +12,374 @@ const CLASS_ROTATION = [
   "Habits For Happiness",
   "The Perfect Knowledge",
   "The Real Freedom",
-];
+]
 
-const FIRST_NAMES = [
-  "Aarav", "Aanya", "Aditya", "Anika", "Arjun", "Diya", "Ishaan", "Isha",
-  "Kabir", "Kavya", "Krishna", "Meera", "Neha", "Nisha", "Pooja", "Rahul",
-  "Riya", "Rohit", "Sanya", "Sneha", "Tanvi", "Varun", "Vikram", "Yash",
-];
-
-const LAST_NAMES = [
-  "Sharma", "Verma", "Gupta", "Singh", "Patel", "Mehta", "Iyer", "Rao",
-  "Khan", "Malhotra", "Kapoor", "Joshi", "Nair", "Bose", "Chopra",
-];
-
-const INSTITUTIONS = [
-  "National College", "City University", "Greenfield Institute", "Riverdale College",
-  "Sunrise University", "Metro College", "Oakridge School", "Silverline Academy",
-];
-
-const COMPANIES = [
-  "Infosys", "TCS", "Wipro", "HCL", "Tech Mahindra", "Capgemini", "Accenture",
-  "Cognizant", "Deloitte", "KPMG", "EY", "PwC",
-];
-
-const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const pick = (arr) => arr[rand(0, arr.length - 1)];
-
-const parseArgs = () => {
-  const args = process.argv.slice(2);
-  const getArg = (key, fallback) => {
-    const idx = args.indexOf(`--${key}`);
-    return idx === -1 ? fallback : args[idx + 1] ?? fallback;
-  };
-  return {
-    count: Number(getArg("count", "100")),
-    weeks: Number(getArg("weeks", "12")),
-    inactiveCount: Number(getArg("inactive", "20")),
-  };
-};
+const SESSION_END_DATE = "2026-05-31"
+const SESSION_COUNT = 8
+const PROMOTED_AT = "2026-05-31T18:00:00Z"
+const PROMOTION_TRIP_DATE = "2026-05-24"
 
 const parseDate = (value) => {
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const toDateKeyUTC = (date) => date.toISOString().slice(0, 10)
+
+const getSessionDates = (count) => {
+  const endDate = parseDate(SESSION_END_DATE)
+  if (!endDate) {
+    throw new Error(`Invalid session end date: ${SESSION_END_DATE}`)
+  }
+
+  const dates = []
+  for (let i = 0; i < count; i += 1) {
+    const date = new Date(endDate)
+    date.setUTCDate(endDate.getUTCDate() - 7 * i)
+    dates.push(toDateKeyUTC(date))
+  }
+  return dates
+}
 
 const getClassNameForDate = (classDate) => {
-  const date = parseDate(classDate);
-  if (!date || date.getUTCDay() !== 0) return null;
-  const start = parseDate(CLASS_ROTATION_START);
-  if (!start) return null;
-  const diffDays = Math.floor((date - start) / (24 * 60 * 60 * 1000));
-  if (diffDays % 7 !== 0) return null;
-  const weeksOffset = diffDays / 7;
-  const index =
-    ((weeksOffset + CLASS_ROTATION_START_INDEX) % CLASS_ROTATION.length +
-      CLASS_ROTATION.length) %
-    CLASS_ROTATION.length;
-  return CLASS_ROTATION[index];
-};
+  const date = parseDate(classDate)
+  if (!date || date.getUTCDay() !== 0) return null
 
-const toDateKeyUTC = (date) => date.toISOString().slice(0, 10);
+  const endDate = parseDate(SESSION_END_DATE)
+  if (!endDate) return null
 
-const getLastSundays = (weeks) => {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const day = today.getUTCDay();
-  const lastSunday = new Date(today);
-  lastSunday.setUTCDate(today.getUTCDate() - day);
-  const dates = [];
-  for (let i = 0; i < weeks; i += 1) {
-    const d = new Date(lastSunday);
-    d.setUTCDate(lastSunday.getUTCDate() - 7 * i);
-    dates.push(toDateKeyUTC(d));
-  }
-  return dates;
-};
+  const diffDays = Math.floor((endDate - date) / (24 * 60 * 60 * 1000))
+  if (diffDays % 7 !== 0) return null
 
-const generatePhone = (index) => {
-  const suffix = String(100000 + index).padStart(6, "0");
-  return `+91${rand(7000, 9999)}${suffix}`;
-};
+  const weeksOffset = diffDays / 7
+  const index = (6 - weeksOffset + CLASS_ROTATION.length * 100) % CLASS_ROTATION.length
+  return CLASS_ROTATION[index]
+}
+
+const STUDENT_SEEDS = [
+  {
+    full_name: "Aarav Sharma",
+    phone: "9000000001",
+    age: 19,
+    student_type: "studying",
+    college_name: "National College",
+    branch: "Computer Science",
+    semester: 6,
+    active: true,
+    attendance: ["present", "present", "present", "present", "present", "present", "present", "present"],
+  },
+  {
+    full_name: "Anika Rao",
+    phone: "9000000002",
+    age: 20,
+    student_type: "studying",
+    college_name: "City University",
+    branch: "Electronics",
+    semester: 4,
+    active: true,
+    attendance: ["present", "present", "present", "present", "present", "present", "absent", "present"],
+  },
+  {
+    full_name: "Kabir Patel",
+    phone: "9000000003",
+    age: 21,
+    student_type: "studying",
+    college_name: "Greenfield Institute",
+    branch: "Mechanical",
+    semester: 2,
+    active: true,
+    attendance: ["present", "present", "present", "absent", "present", "present", "present", "present"],
+  },
+  {
+    full_name: "Diya Joshi",
+    phone: "9000000004",
+    age: 19,
+    student_type: "studying",
+    college_name: "Metro College",
+    branch: "Information Technology",
+    semester: 8,
+    active: true,
+    attendance: ["present", "present", "present", "present", "absent", "present", "present", "present"],
+  },
+  {
+    full_name: "Isha Khan",
+    phone: "9000000005",
+    age: 22,
+    student_type: "studying",
+    college_name: "Oakridge College",
+    branch: "Electrical",
+    semester: 5,
+    active: false,
+    attendance: ["absent", "absent", "present", "absent", "absent", "absent", "present", "absent"],
+  },
+  {
+    full_name: "Yash Bose",
+    phone: "9000000006",
+    age: 18,
+    student_type: "studying",
+    college_name: "Silverline Academy",
+    branch: "Commerce",
+    semester: 3,
+    active: false,
+    attendance: ["absent", "present", "absent", "absent", "absent", "absent", "absent", "absent"],
+  },
+  {
+    full_name: "Rahul Mehta",
+    phone: "9000000007",
+    age: 28,
+    student_type: "working",
+    company_name: "Infosys",
+    designation: "Software Engineer",
+    experience: 3.5,
+    active: true,
+    attendance: ["present", "present", "present", "present", "present", "absent", "present", "present"],
+  },
+  {
+    full_name: "Sneha Singh",
+    phone: "9000000008",
+    age: 26,
+    student_type: "working",
+    company_name: "TCS",
+    designation: "Analyst",
+    experience: 1.5,
+    active: true,
+    attendance: ["present", "present", "present", "present", "absent", "present", "present", "absent"],
+  },
+  {
+    full_name: "Varun Nair",
+    phone: "9000000009",
+    age: 31,
+    student_type: "working",
+    company_name: "Wipro",
+    designation: "Consultant",
+    experience: 5,
+    active: true,
+    attendance: ["present", "present", "absent", "present", "present", "present", "present", "absent"],
+  },
+  {
+    full_name: "Riya Kapoor",
+    phone: "9000000010",
+    age: 27,
+    student_type: "working",
+    company_name: "HCL",
+    designation: "Associate",
+    experience: 3,
+    active: false,
+    attendance: ["absent", "present", "absent", "absent", "absent", "absent", "absent", "present"],
+  },
+  {
+    full_name: "Aditya Gupta",
+    phone: "9000000011",
+    age: 24,
+    student_type: "working",
+    company_name: "Accenture",
+    designation: "Developer",
+    experience: 1.5,
+    active: false,
+    attendance: ["absent", "absent", "absent", "absent", "present", "absent", "absent", "absent"],
+  },
+  {
+    full_name: "Meera Verma",
+    phone: "9000000012",
+    age: 22,
+    student_type: "studying",
+    college_name: "Riverdale College",
+    branch: "Psychology",
+    semester: 8,
+    active: false,
+    level: 2,
+    promoted_at: PROMOTED_AT,
+  },
+  {
+    full_name: "Tanvi Chopra",
+    phone: "9000000013",
+    age: 23,
+    student_type: "studying",
+    college_name: "Sunrise University",
+    branch: "Commerce",
+    semester: 8,
+    active: false,
+    level: 2,
+    promoted_at: PROMOTED_AT,
+  },
+  {
+    full_name: "Arjun Iyer",
+    phone: "9000000014",
+    age: 33,
+    student_type: "working",
+    company_name: "Deloitte",
+    designation: "Lead Engineer",
+    experience: 6,
+    active: false,
+    level: 2,
+    promoted_at: PROMOTED_AT,
+  },
+  {
+    full_name: "Nisha Gupta",
+    phone: "9000000015",
+    age: 29,
+    student_type: "working",
+    company_name: "EY",
+    designation: "Manager",
+    experience: 7,
+    active: false,
+    level: 2,
+    promoted_at: PROMOTED_AT,
+  },
+]
 
 const main = async () => {
-  const { count, weeks, inactiveCount } = parseArgs();
-  const client = await pool.connect();
+  const client = await pool.connect()
 
   try {
-    await client.query("BEGIN");
+    await client.query("BEGIN")
+
+    await client.query(
+      "TRUNCATE TABLE attendance, trip_participants, class_sessions, trips, students, classes RESTART IDENTITY CASCADE"
+    )
 
     for (let i = 0; i < CLASS_ROTATION.length; i += 1) {
       await client.query(
         `INSERT INTO classes (name, order_index)
-         VALUES ($1, $2)
-         ON CONFLICT (name)
-         DO UPDATE SET order_index = EXCLUDED.order_index`,
+         VALUES ($1, $2)`,
         [CLASS_ROTATION[i], i + 1]
-      );
+      )
     }
 
     const adminResult = await client.query(
       "SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1"
-    );
-    const adminId = adminResult.rows[0]?.id ?? null;
+    )
+    const adminId = adminResult.rows[0]?.id ?? null
 
-    const studentIds = [];
-    for (let i = 0; i < count; i += 1) {
-      const fullName = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
-      const studentType = Math.random() < 0.55 ? "studying" : "working";
-      const age = rand(18, 45);
-      const phone = generatePhone(i + 1);
-      const institution = studentType === "studying" ? pick(INSTITUTIONS) : null;
-      const company = studentType === "working" ? pick(COMPANIES) : null;
-
-      const result = await client.query(
-        `INSERT INTO students (full_name, phone, age, student_type, institution_name, company_name, active)
-         VALUES ($1, $2, $3, $4, $5, $6, true)
-         RETURNING id`,
-        [fullName, phone, age, studentType, institution, company]
-      );
-      studentIds.push(result.rows[0].id);
+    if (!adminId) {
+      throw new Error("No admin user found. Create an admin first.")
     }
 
-    const sundayDates = getLastSundays(weeks);
-    const sessionIds = [];
-    for (const classDate of sundayDates) {
-      const className = getClassNameForDate(classDate);
-      const classIdResult = className
-        ? await client.query("SELECT id FROM classes WHERE name = $1", [className])
-        : null;
-      const classId = classIdResult?.rows[0]?.id ?? null;
+    const sessionDates = getSessionDates(SESSION_COUNT)
+    const sessions = []
+
+    for (const classDate of sessionDates) {
+      const className = getClassNameForDate(classDate)
+      if (!className) {
+        throw new Error(`Could not resolve class name for ${classDate}`)
+      }
+
+      const classResult = await client.query("SELECT id FROM classes WHERE name = $1", [className])
+      const classId = classResult.rows[0]?.id ?? null
+
+      if (!classId) {
+        throw new Error(`Missing class row for ${className}`)
+      }
 
       const sessionResult = await client.query(
         `INSERT INTO class_sessions (class_date, day_of_week, class_id, created_by)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (class_date)
-         DO UPDATE SET class_id = EXCLUDED.class_id
          RETURNING id`,
         [classDate, "Sunday", classId, adminId]
-      );
-      sessionIds.push({ id: sessionResult.rows[0].id, date: classDate });
+      )
+
+      sessions.push({ id: sessionResult.rows[0].id, date: classDate, className })
     }
 
-    const inactiveIds = new Set();
-    while (inactiveIds.size < Math.min(inactiveCount, studentIds.length)) {
-      inactiveIds.add(studentIds[rand(0, studentIds.length - 1)]);
-    }
+    const insertedStudents = []
+    const promotedStudentIds = []
 
-    for (let s = 0; s < sessionIds.length; s += 1) {
-      const session = sessionIds[s];
-      const isLastTwo = s < 2; // sundayDates is latest first
-      for (const studentId of studentIds) {
-        let status = "present";
-        if (inactiveIds.has(studentId) && isLastTwo) {
-          status = "absent";
-        } else {
-          const presentChance = inactiveIds.has(studentId) ? 0.3 : 0.7;
-          status = Math.random() < presentChance ? "present" : "absent";
-        }
+    for (const student of STUDENT_SEEDS) {
+      const result = await client.query(
+        `INSERT INTO students (
+           full_name,
+           phone,
+           age,
+           student_type,
+           college_name,
+           branch,
+           semester,
+           company_name,
+           designation,
+           experience,
+           active,
+           level,
+           promoted_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING id`,
+        [
+          student.full_name,
+          student.phone,
+          student.age,
+          student.student_type,
+          student.student_type === "studying" ? student.college_name : null,
+          student.student_type === "studying" ? student.branch : null,
+          student.student_type === "studying" ? student.semester : null,
+          student.student_type === "working" ? student.company_name : null,
+          student.student_type === "working" ? student.designation : null,
+          student.student_type === "working" ? student.experience : null,
+          student.active ?? true,
+          student.level ?? 1,
+          student.promoted_at ?? null,
+        ]
+      )
 
-        await client.query(
-          `INSERT INTO attendance (session_id, student_id, status, marked_by, marked_at)
-           VALUES ($1, $2, $3, $4, NOW())
-           ON CONFLICT (session_id, student_id)
-           DO UPDATE SET status = EXCLUDED.status, marked_by = EXCLUDED.marked_by, marked_at = NOW()`,
-          [session.id, studentId, status, adminId]
-        );
+      const studentId = result.rows[0].id
+      insertedStudents.push({ id: studentId, ...student })
+
+      if ((student.level ?? 1) >= 2) {
+        promotedStudentIds.push(studentId)
       }
     }
 
-    if (inactiveIds.size > 0) {
-      await client.query(
-        `UPDATE students SET active = false WHERE id = ANY($1::uuid[])`,
-        [Array.from(inactiveIds)]
-      );
+    for (const [sessionIndex, session] of sessions.entries()) {
+      for (const student of insertedStudents) {
+        if ((student.level ?? 1) >= 2) {
+          continue
+        }
+
+        const status = student.attendance?.[sessionIndex] ?? "absent"
+        await client.query(
+          `INSERT INTO attendance (session_id, student_id, status, marked_by, marked_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (session_id, student_id)
+           DO UPDATE SET status = EXCLUDED.status, marked_by = EXCLUDED.marked_by, marked_at = EXCLUDED.marked_at`,
+          [session.id, student.id, status, adminId, `${session.date}T09:00:00Z`]
+        )
+      }
     }
 
-    await client.query("COMMIT");
-    console.log(`Seeded ${count} students, ${sessionIds.length} sessions, attendance for all students.`);
-    console.log(`Inactive students: ${inactiveIds.size}`);
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error("Failed to seed data:", error);
-    process.exitCode = 1;
-  } finally {
-    client.release();
-  }
-};
+    const tripResult = await client.query(
+      `INSERT INTO trips (trip_date, details, created_by)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [PROMOTION_TRIP_DATE, "Promotion retreat", adminId]
+    )
+    const tripId = tripResult.rows[0].id
 
-main();
+    for (const studentId of promotedStudentIds) {
+      await client.query(
+        `INSERT INTO trip_participants (trip_id, student_id, added_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (trip_id, student_id) DO NOTHING`,
+        [tripId, studentId, `${PROMOTION_TRIP_DATE}T10:00:00Z`]
+      )
+    }
+
+    await client.query("COMMIT")
+
+    const totalStudying = STUDENT_SEEDS.filter((student) => student.student_type === "studying").length
+    const totalWorking = STUDENT_SEEDS.filter((student) => student.student_type === "working").length
+    const activeCount = STUDENT_SEEDS.filter((student) => (student.level ?? 1) === 1 && student.active).length
+    const inactiveCount = STUDENT_SEEDS.filter((student) => (student.level ?? 1) === 1 && !student.active).length
+
+    console.log("Seeded test data successfully.")
+    console.log(`Students: ${STUDENT_SEEDS.length} total, ${totalStudying} studying, ${totalWorking} working`)
+    console.log(`Level 1 active: ${activeCount}, level 1 inactive: ${inactiveCount}, promoted: ${promotedStudentIds.length}`)
+    console.log(`Classes/sessions seeded through ${SESSION_END_DATE}. Last attendance date: ${SESSION_END_DATE}`)
+  } catch (error) {
+    await client.query("ROLLBACK")
+    console.error("Failed to seed data:", error)
+    process.exitCode = 1
+  } finally {
+    client.release()
+  }
+}
+
+main()
