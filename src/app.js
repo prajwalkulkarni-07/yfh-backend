@@ -7,6 +7,9 @@ import studentsRoutes from "./routes/studentsRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import reportsRoutes from "./routes/reportsRoutes.js";
 import tripsRoutes from "./routes/tripsRoutes.js";
+import volunteeringRoutes from "./routes/volunteeringRoutes.js";
+import gitaStudentsRoutes from "./routes/gitaStudentsRoutes.js";
+import gitaAttendanceRoutes from "./routes/gitaAttendanceRoutes.js";
 
 const app = express();
 
@@ -43,6 +46,9 @@ app.use("/api/students", studentsRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/trips", tripsRoutes);
+app.use("/api/volunteering", volunteeringRoutes);
+app.use("/api/gita/students", gitaStudentsRoutes);
+app.use("/api/gita/attendance", gitaAttendanceRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

@@ -37,14 +37,18 @@ export const promoteEligibleStudents = async (client) => {
      completed_trip AS (
        SELECT tp.student_id
        FROM trip_participants tp
-       INNER JOIN trips t ON t.id = tp.trip_id
-       WHERE t.trip_date < CURRENT_DATE
        GROUP BY tp.student_id
+     ),
+     completed_volunteering AS (
+       SELECT vp.student_id
+       FROM volunteering_participants vp
+       GROUP BY vp.student_id
      ),
      eligible AS (
        SELECT cc.student_id
        FROM completed_classes cc
        INNER JOIN completed_trip ct ON ct.student_id = cc.student_id
+       INNER JOIN completed_volunteering cv ON cv.student_id = cc.student_id
      )
      UPDATE students
      SET level = 2,
@@ -52,5 +56,14 @@ export const promoteEligibleStudents = async (client) => {
          active = false
      WHERE id IN (SELECT student_id FROM eligible)
        AND level < 2`
+  );
+
+  await client.query(
+    `INSERT INTO gita_students (student_id)
+     SELECT id
+     FROM students
+     WHERE level >= 2
+     ON CONFLICT (student_id)
+     DO NOTHING`
   );
 };

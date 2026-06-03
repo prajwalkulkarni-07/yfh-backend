@@ -10,20 +10,12 @@ const parseTripDate = (value) => {
   return dateOnly;
 };
 
-const isTripLocked = (tripDate) => {
-  const dateOnly = String(tripDate || "").split("T")[0];
-  const dateObj = new Date(`${dateOnly}T00:00:00Z`);
-  const lockDate = new Date(dateObj);
-  lockDate.setUTCDate(lockDate.getUTCDate() - 1);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  return lockDate.getTime() <= today.getTime();
-};
+const isTripLocked = () => false;
 
 const validateStudents = async (client, studentIds) => {
   if (studentIds.length === 0) return [];
   const result = await client.query(
-    "SELECT id FROM students WHERE id = ANY($1::uuid[]) AND level = 1",
+    "SELECT id FROM students WHERE id = ANY($1::uuid[])",
     [studentIds]
   );
   return result.rows.map((row) => row.id);
@@ -133,10 +125,15 @@ export const updateTripParticipants = async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { student_ids, details } = req.body;
+    const { student_ids, details, trip_date } = req.body;
     const studentIds = Array.isArray(student_ids)
       ? Array.from(new Set(student_ids))
       : [];
+    const parsedDate = trip_date !== undefined ? parseTripDate(trip_date) : null;
+
+    if (trip_date !== undefined && !parsedDate) {
+      return errorResponse(res, "trip_date is invalid", 400);
+    }
 
     await client.query("BEGIN");
 
@@ -151,9 +148,8 @@ export const updateTripParticipants = async (req, res) => {
     }
 
     const tripDate = tripResult.rows[0].trip_date;
-    if (isTripLocked(tripDate)) {
-      await client.query("ROLLBACK");
-      return errorResponse(res, "Trip is locked for changes", 400);
+    if (parsedDate && parsedDate !== tripDate) {
+      await client.query("UPDATE trips SET trip_date = $1 WHERE id = $2", [parsedDate, id]);
     }
 
     if (details !== undefined) {
@@ -214,12 +210,6 @@ export const deleteTrip = async (req, res) => {
     if (tripResult.rows.length === 0) {
       await client.query("ROLLBACK");
       return errorResponse(res, "Trip not found", 404);
-    }
-
-    const tripDate = tripResult.rows[0].trip_date;
-    if (isTripLocked(tripDate)) {
-      await client.query("ROLLBACK");
-      return errorResponse(res, "Trip is locked for changes", 400);
     }
 
     await client.query("DELETE FROM trips WHERE id = $1", [id]);

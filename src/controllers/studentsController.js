@@ -425,56 +425,100 @@ export const getStudentDetails = async (req, res) => {
       [id]
     );
 
-    const tripResult = await pool.query(
-      `WITH student_trips AS (
-         SELECT t.trip_date, t.details
-         FROM trips t
-         INNER JOIN trip_participants tp ON tp.trip_id = t.id
-         WHERE tp.student_id = $1
-       ),
-       attended AS (
-         SELECT trip_date, details
-         FROM student_trips
-         WHERE trip_date < CURRENT_DATE
-         ORDER BY trip_date DESC
-         LIMIT 1
-       ),
-       upcoming AS (
-         SELECT trip_date, details
-         FROM student_trips
-         WHERE trip_date >= CURRENT_DATE
-         ORDER BY trip_date ASC
-         LIMIT 1
-       )
-      SELECT (SELECT trip_date FROM attended) as last_attended_trip_date,
-              (SELECT details FROM attended) as last_attended_trip_details,
-              (SELECT trip_date FROM upcoming) as next_trip_date,
-              (SELECT details FROM upcoming) as next_trip_details,
-              EXISTS (SELECT 1 FROM attended) as has_attended_trip,
-              EXISTS (SELECT 1 FROM upcoming) as has_upcoming_trip`,
+    const tripHistoryResult = await pool.query(
+      `SELECT t.trip_date::text as trip_date,
+              t.details,
+              tp.added_at::text as recorded_at
+       FROM trip_participants tp
+       INNER JOIN trips t ON t.id = tp.trip_id
+       WHERE tp.student_id = $1
+       ORDER BY t.trip_date DESC, tp.added_at DESC`,
       [id]
     );
 
-    const tripInfo = tripResult.rows[0] ?? {
-      last_attended_trip_date: null,
-      last_attended_trip_details: null,
-      next_trip_date: null,
-      next_trip_details: null,
-      has_attended_trip: false,
-      has_upcoming_trip: false,
+    const volunteeringHistoryResult = await pool.query(
+      `SELECT vs.service_date::text as service_date,
+              vs.details,
+              vp.added_at::text as recorded_at
+       FROM volunteering_participants vp
+       INNER JOIN volunteering_services vs ON vs.id = vp.service_id
+       WHERE vp.student_id = $1
+       ORDER BY vs.service_date DESC, vp.added_at DESC`,
+      [id]
+    );
+
+    const promotionResult = await pool.query(
+      `WITH class_count AS (
+         SELECT COUNT(DISTINCT c.id) as attended_classes
+         FROM attendance a
+         INNER JOIN class_sessions s ON s.id = a.session_id
+         INNER JOIN classes c ON c.id = s.class_id
+         WHERE a.student_id = $1
+           AND a.status = 'present'
+       ),
+       trip_count AS (
+         SELECT COUNT(DISTINCT tp.trip_id) as trip_count
+         FROM trip_participants tp
+         WHERE tp.student_id = $1
+       ),
+       volunteering_count AS (
+         SELECT COUNT(DISTINCT vp.service_id) as volunteering_count
+         FROM volunteering_participants vp
+         WHERE vp.student_id = $1
+       )
+       SELECT cc.attended_classes,
+              tc.trip_count,
+              vc.volunteering_count,
+              (SELECT COUNT(*) FROM classes) as total_classes
+       FROM class_count cc, trip_count tc, volunteering_count vc`,
+      [id]
+    );
+
+    const promotionInfo = promotionResult.rows[0] ?? {
+      attended_classes: 0,
+      trip_count: 0,
+      volunteering_count: 0,
+      total_classes: 8,
+    };
+
+    const attendedClasses = Number(promotionInfo.attended_classes ?? 0);
+    const tripCount = Number(promotionInfo.trip_count ?? 0);
+    const volunteeringCount = Number(promotionInfo.volunteering_count ?? 0);
+    const totalClasses = Number(promotionInfo.total_classes ?? 8);
+    const missingClasses = Math.max(totalClasses - attendedClasses, 0);
+    const missingParts = [];
+
+    if (missingClasses > 0) {
+      missingParts.push(`Needs to attend ${missingClasses} more class${missingClasses === 1 ? "" : "es"}`);
+    }
+    if (tripCount === 0) {
+      missingParts.push("Needs to attend one trip");
+    }
+    if (volunteeringCount === 0) {
+      missingParts.push("Needs to volunteer once");
+    }
+
+    const promoted = Number(studentResult.rows[0].level ?? 1) >= 2;
+    const promotionStatus = {
+      promoted,
+      attended_classes: attendedClasses,
+      total_classes: totalClasses,
+      attended_trips: tripCount,
+      volunteered_times: volunteeringCount,
+      missing: missingParts,
+      summary: promoted
+        ? "Promoted"
+        : missingParts.length > 0
+          ? missingParts.join(", ")
+          : "Eligible for promotion",
     };
 
     successResponse(res, {
       student: studentResult.rows[0],
       sessions: sessionsResult.rows,
-      trip_info: {
-        last_attended_trip_date: tripInfo.last_attended_trip_date,
-        last_attended_trip_details: tripInfo.last_attended_trip_details,
-        next_trip_date: tripInfo.next_trip_date,
-        next_trip_details: tripInfo.next_trip_details,
-        has_attended_trip: Boolean(tripInfo.has_attended_trip),
-        has_upcoming_trip: Boolean(tripInfo.has_upcoming_trip),
-      },
+      trips: tripHistoryResult.rows,
+      volunteering: volunteeringHistoryResult.rows,
+      promotion_status: promotionStatus,
     }, "Student details fetched successfully");
   } catch (error) {
     console.error("Get student details error:", error);

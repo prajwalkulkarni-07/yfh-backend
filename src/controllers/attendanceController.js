@@ -159,8 +159,7 @@ export const markAttendance = async (req, res) => {
 
     const sessionId = sessionResult.rows[0].id;
     const inserted = [];
-    const studentIds = [];
-    const presentStudentIds = [];
+    const absentStudentIds = [];
 
     for (const record of records) {
       const { student_id, status } = record;
@@ -185,96 +184,30 @@ export const markAttendance = async (req, res) => {
       );
 
       inserted.push(result.rows[0]);
-      studentIds.push(student_id);
-      if (status === "present") {
-        presentStudentIds.push(student_id);
+      if (status === "absent") {
+        absentStudentIds.push(student_id);
       }
     }
 
-    if (presentStudentIds.length > 0) {
+    if (absentStudentIds.length > 0) {
       await client.query(
         `UPDATE students
-         SET active = true
+         SET active = false
          WHERE id = ANY($1::uuid[])
-           AND active = false
+           AND active = true
            AND level = 1`,
-        [presentStudentIds]
+        [absentStudentIds]
       );
     }
 
-    if (studentIds.length > 0) {
+    if (absentStudentIds.length > 0) {
       await client.query(
-        `WITH attended AS (
-           SELECT a.student_id, c.order_index
-           FROM attendance a
-           INNER JOIN class_sessions s ON s.id = a.session_id
-           INNER JOIN classes c ON c.id = s.class_id
-           WHERE a.status = 'present'
-             AND a.student_id = ANY($1::uuid[])
-           GROUP BY a.student_id, c.order_index
-         ),
-         all_classes AS (
-           SELECT order_index
-           FROM classes
-         ),
-         missing AS (
-           SELECT st.id as student_id, ac.order_index
-           FROM students st
-           CROSS JOIN all_classes ac
-           LEFT JOIN attended a
-             ON a.student_id = st.id
-            AND a.order_index = ac.order_index
-           WHERE st.id = ANY($1::uuid[])
-             AND st.level = 1
-             AND a.order_index IS NULL
-         ),
-         next_required AS (
-           SELECT student_id, MIN(order_index) as order_index
-           FROM missing
-           GROUP BY student_id
-         ),
-         completed AS (
-           SELECT st.id as student_id
-           FROM students st
-           LEFT JOIN attended a ON a.student_id = st.id
-           WHERE st.id = ANY($1::uuid[])
-             AND st.level = 1
-           GROUP BY st.id
-           HAVING COUNT(a.order_index) = (SELECT COUNT(*) FROM classes)
-         ),
-         target AS (
-           SELECT nr.student_id, nr.order_index
-           FROM next_required nr
-           LEFT JOIN completed c ON c.student_id = nr.student_id
-           WHERE c.student_id IS NULL
-         ),
-         last_two_sessions AS (
-           SELECT t.student_id, s.id as session_id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY t.student_id
-                    ORDER BY s.class_date DESC
-                  ) AS rn
-           FROM target t
-           INNER JOIN classes c ON c.order_index = t.order_index
-           INNER JOIN class_sessions s ON s.class_id = c.id
-         ),
-         eligible AS (
-           SELECT lts.student_id
-           FROM last_two_sessions lts
-           LEFT JOIN attendance a
-             ON a.session_id = lts.session_id
-            AND a.student_id = lts.student_id
-            AND a.status = 'present'
-           WHERE lts.rn <= 2
-           GROUP BY lts.student_id
-           HAVING COUNT(*) = 2 AND COUNT(a.session_id) = 0
-         )
-         UPDATE students
+        `UPDATE students
          SET active = false
-         WHERE id IN (SELECT student_id FROM eligible)
+         WHERE id = ANY($1::uuid[])
            AND active = true
            AND level = 1`,
-        [studentIds]
+        [absentStudentIds]
       );
     }
 
@@ -288,6 +221,8 @@ export const markAttendance = async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Mark attendance error:", error);
+
+      await promoteEligibleStudents(client);
     errorResponse(res, "Failed to mark attendance", 500);
   } finally {
     client.release();
