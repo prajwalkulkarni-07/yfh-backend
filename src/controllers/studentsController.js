@@ -153,7 +153,7 @@ export const getStudents = async (req, res) => {
               active, level, promoted_at, created_at
        FROM students
        WHERE ${where}
-       ORDER BY created_at DESC`,
+       ORDER BY LOWER(full_name) ASC, full_name ASC`,
       params
     );
 
@@ -413,7 +413,12 @@ export const getStudentDetails = async (req, res) => {
               c.name as class_name,
               c.order_index,
               CASE WHEN COUNT(a.id) = 0 THEN 'absent' ELSE 'present' END as status,
-              MAX(s.class_date)::text as attended_on
+              MAX(s.class_date)::text as attended_on,
+              COALESCE(
+                ARRAY_AGG(s.class_date::text ORDER BY s.class_date ASC)
+                  FILTER (WHERE a.id IS NOT NULL),
+                ARRAY[]::text[]
+              ) as attended_dates
        FROM classes c
        LEFT JOIN class_sessions s ON s.class_id = c.id
        LEFT JOIN attendance a

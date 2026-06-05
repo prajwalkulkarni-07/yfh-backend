@@ -132,6 +132,112 @@ export const getPromotedReport = async (_req, res) => {
   }
 };
 
+export const getReportByClass = async (_req, res) => {
+  try {
+    await promoteEligibleStudents(pool);
+
+    const result = await pool.query(
+      `WITH attended AS (
+         SELECT DISTINCT a.student_id, c.id as class_id
+         FROM attendance a
+         INNER JOIN class_sessions s ON s.id = a.session_id
+         INNER JOIN classes c ON c.id = s.class_id
+         WHERE a.status = 'present'
+       )
+       SELECT c.id as class_id,
+              c.name as class_name,
+              c.order_index,
+              COALESCE(
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'id', st.id,
+                    'full_name', st.full_name,
+                    'phone', st.phone
+                  )
+                  ORDER BY LOWER(st.full_name), st.full_name
+                ) FILTER (WHERE st.id IS NOT NULL),
+                '[]'::json
+              ) as students
+       FROM classes c
+       CROSS JOIN students st
+       LEFT JOIN attended at
+         ON at.student_id = st.id
+        AND at.class_id = c.id
+       WHERE st.level = 1
+         AND at.student_id IS NULL
+       GROUP BY c.id, c.name, c.order_index
+       ORDER BY c.order_index ASC`
+    );
+
+    successResponse(res, result.rows, "Class report fetched successfully");
+  } catch (error) {
+    console.error("Class report error:", error);
+    errorResponse(res, "Failed to fetch class report", 500);
+  }
+};
+
+export const getAllStudentsReport = async (_req, res) => {
+  try {
+    await promoteEligibleStudents(pool);
+
+    const result = await pool.query(
+      `WITH class_attendance AS (
+         SELECT a.student_id,
+                c.id as class_id
+         FROM attendance a
+         INNER JOIN class_sessions s ON s.id = a.session_id
+         INNER JOIN classes c ON c.id = s.class_id
+         WHERE a.status = 'present'
+         GROUP BY a.student_id, c.id
+       ),
+       class_status AS (
+         SELECT st.id as student_id,
+                JSON_AGG(
+                  JSON_BUILD_OBJECT(
+                    'class_id', c.id,
+                    'class_name', c.name,
+                    'order_index', c.order_index,
+                    'status', CASE WHEN ca.student_id IS NULL THEN 'Not Attended' ELSE 'Attended' END
+                  )
+                  ORDER BY c.order_index
+                ) as classes
+         FROM students st
+         CROSS JOIN classes c
+         LEFT JOIN class_attendance ca
+           ON ca.student_id = st.id
+          AND ca.class_id = c.id
+         GROUP BY st.id
+       ),
+       trip_status AS (
+         SELECT DISTINCT student_id
+         FROM trip_participants
+       ),
+       volunteering_status AS (
+         SELECT DISTINCT student_id
+         FROM volunteering_participants
+       )
+       SELECT st.id,
+              st.full_name,
+              st.phone,
+              cs.classes,
+              CASE WHEN ts.student_id IS NULL THEN 'Not Attended' ELSE 'Attended' END as trip,
+              CASE WHEN vs.student_id IS NULL THEN 'Not Done' ELSE 'Done' END as volunteering,
+              CASE WHEN st.active THEN 'Active' ELSE 'Inactive' END as activity_status,
+              CASE WHEN COALESCE(st.level, 1) >= 2 THEN 'Promoted' ELSE 'Not Promoted' END as promotion_status
+       FROM students st
+       INNER JOIN class_status cs ON cs.student_id = st.id
+       LEFT JOIN trip_status ts ON ts.student_id = st.id
+       LEFT JOIN volunteering_status vs ON vs.student_id = st.id
+       ORDER BY LOWER(st.full_name), st.full_name`
+    );
+
+    successResponse(res, result.rows, "All students report fetched successfully");
+  } catch (error) {
+    console.error("All students report error:", error);
+    errorResponse(res, "Failed to fetch all students report", 500);
+  }
+};
+
 export const getYetToAttendTripReport = async (_req, res) => {
   try {
     await promoteEligibleStudents(pool);

@@ -35,6 +35,32 @@ const parseDate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const getTodayKey = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const isFutureDate = (value) => {
+  return String(value) > getTodayKey();
+};
+
+const ensureValidSessionDate = (classDate) => {
+  const date = parseDate(classDate);
+  if (!date) {
+    return "class_date must be a valid date";
+  }
+  if (date.getUTCDay() !== 0) {
+    return "Yoga for Happiness sessions are only on Sundays";
+  }
+  if (isFutureDate(classDate)) {
+    return "Attendance cannot be taken for a future session";
+  }
+  return null;
+};
+
 const getClassNameForDate = (classDate) => {
   const date = parseDate(classDate);
   if (!date || date.getUTCDay() !== 0) return null;
@@ -79,6 +105,11 @@ export const createSession = async (req, res) => {
 
     if (!class_date) {
       return errorResponse(res, "class_date is required", 400);
+    }
+
+    const dateError = ensureValidSessionDate(class_date);
+    if (dateError) {
+      return errorResponse(res, dateError, 400);
     }
 
     const dayOfWeek = getDayOfWeek(class_date);
@@ -141,6 +172,11 @@ export const markAttendance = async (req, res) => {
 
     if (!class_date || !Array.isArray(records) || records.length === 0) {
       return errorResponse(res, "class_date and records are required", 400);
+    }
+
+    const dateError = ensureValidSessionDate(class_date);
+    if (dateError) {
+      return errorResponse(res, dateError, 400);
     }
 
     await client.query("BEGIN");

@@ -1,7 +1,9 @@
 import express from "express";
 import {
+	getAllStudentsReport,
 	getEligibleReport,
 	getInactiveReport,
+	getReportByClass,
 	getPromotedReport,
 	getYetToAttendTripReport,
 	getYetToVolunteerReport,
@@ -17,6 +19,8 @@ router.get("/inactive", getInactiveReport);
 router.get("/eligible", getEligibleReport);
 router.get("/yet-to-attend-trip", getYetToAttendTripReport);
 router.get("/yet-to-volunteer", getYetToVolunteerReport);
+router.get("/by-class", getReportByClass);
 router.get("/promoted", getPromotedReport);
+router.get("/all-students", getAllStudentsReport);
 
 export default router;
