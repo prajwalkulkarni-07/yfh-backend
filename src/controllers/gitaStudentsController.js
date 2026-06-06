@@ -19,7 +19,7 @@ export const getGitaStudents = async (_req, res) => {
     const result = await pool.query(
       `SELECT st.id, st.full_name, st.email, st.phone, st.age, st.student_type,
               st.college_name, st.branch, st.semester, st.company_name, st.designation,
-              st.experience, st.active, st.level, st.promoted_at, st.created_at
+              st.experience, st.description, st.active, st.level, st.promoted_at, st.created_at
        FROM gita_students gs
        INNER JOIN students st ON st.id = gs.student_id
        ORDER BY st.full_name ASC`
@@ -41,7 +41,7 @@ export const getGitaStudentById = async (req, res) => {
     const result = await pool.query(
       `SELECT st.id, st.full_name, st.email, st.phone, st.age, st.student_type,
               st.college_name, st.branch, st.semester, st.company_name, st.designation,
-              st.experience, st.active, st.level, st.promoted_at, st.created_at
+              st.experience, st.description, st.active, st.level, st.promoted_at, st.created_at
        FROM gita_students gs
        INNER JOIN students st ON st.id = gs.student_id
        WHERE st.id = $1`,

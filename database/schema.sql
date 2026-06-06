@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS students (
   company_name text,
   designation text,
   experience numeric,
+  description text,
   active boolean NOT NULL DEFAULT true,
   level integer NOT NULL DEFAULT 1,
   promoted_at timestamptz,

@@ -13,6 +13,8 @@ const CLASS_ROTATION = [
   "The Real Freedom",
 ];
 
+const STUDENT_TYPES = ["studying", "working", "not_studying_not_working"];
+
 const ensureClasses = async () => {
   for (let i = 0; i < CLASS_ROTATION.length; i += 1) {
     await pool.query(
@@ -38,6 +40,7 @@ export const createStudent = async (req, res) => {
       company_name,
       designation,
       experience,
+      description,
     } = req.body;
 
     if (!full_name || String(full_name).trim() === "") {
@@ -62,8 +65,8 @@ export const createStudent = async (req, res) => {
       return errorResponse(res, "age must be a positive number", 400);
     }
 
-    if (!student_type || !["studying", "working"].includes(student_type)) {
-      return errorResponse(res, "student_type must be 'studying' or 'working'", 400);
+    if (!student_type || !STUDENT_TYPES.includes(student_type)) {
+      return errorResponse(res, "student_type must be 'studying', 'working', or 'not_studying_not_working'", 400);
     }
 
     const parsedSemester = semester !== undefined ? Number(semester) : undefined;
@@ -93,6 +96,12 @@ export const createStudent = async (req, res) => {
       }
     }
 
+    if (student_type === "not_studying_not_working") {
+      if (!description || String(description).trim() === "") {
+        return errorResponse(res, "description is required for not studying/not working", 400);
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO students (
          full_name,
@@ -104,9 +113,10 @@ export const createStudent = async (req, res) => {
          semester,
          company_name,
          designation,
-         experience
+         experience,
+         description
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         full_name.trim(),
@@ -119,6 +129,7 @@ export const createStudent = async (req, res) => {
         student_type === "working" ? String(company_name).trim() : null,
         student_type === "working" ? String(designation).trim() : null,
         student_type === "working" ? parsedExperience : null,
+        student_type === "not_studying_not_working" ? String(description).trim() : null,
       ]
     );
 
@@ -149,7 +160,7 @@ export const getStudents = async (req, res) => {
 
     const result = await pool.query(
           `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
-            company_name, designation, experience,
+            company_name, designation, experience, description,
               active, level, promoted_at, created_at
        FROM students
        WHERE ${where}
@@ -170,7 +181,7 @@ export const getStudentById = async (req, res) => {
 
     const result = await pool.query(
           `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
-            company_name, designation, experience,
+            company_name, designation, experience, description,
               active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]
@@ -201,6 +212,7 @@ export const updateStudent = async (req, res) => {
       company_name,
       designation,
       experience,
+      description,
     } = req.body;
 
     if (phone !== undefined && String(phone).trim() === "") {
@@ -225,14 +237,14 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    if (student_type !== undefined && !["studying", "working"].includes(student_type)) {
-      return errorResponse(res, "student_type must be 'studying' or 'working'", 400);
+    if (student_type !== undefined && !STUDENT_TYPES.includes(student_type)) {
+      return errorResponse(res, "student_type must be 'studying', 'working', or 'not_studying_not_working'", 400);
     }
 
     const parsedSemester = semester !== undefined ? Number(semester) : undefined;
     const parsedExperience = experience !== undefined ? Number(experience) : undefined;
 
-    if ((college_name !== undefined || branch !== undefined || semester !== undefined || company_name !== undefined || designation !== undefined || experience !== undefined) && !student_type) {
+    if ((college_name !== undefined || branch !== undefined || semester !== undefined || company_name !== undefined || designation !== undefined || experience !== undefined || description !== undefined) && !student_type) {
       return errorResponse(res, "student_type is required when updating profile details", 400);
     }
 
@@ -260,6 +272,15 @@ export const updateStudent = async (req, res) => {
       }
     }
 
+    const descriptionValue =
+      description !== undefined ? String(description).trim() : undefined;
+
+    if (student_type === "not_studying_not_working") {
+      if (!descriptionValue) {
+        return errorResponse(res, "description is required for not studying/not working", 400);
+      }
+    }
+
     const result = await pool.query(
       `UPDATE students
        SET full_name = COALESCE($1, full_name),
@@ -268,37 +289,42 @@ export const updateStudent = async (req, res) => {
            student_type = COALESCE($4, student_type),
            college_name = CASE
              WHEN $4 = 'studying' THEN $5
-             WHEN $4 = 'working' THEN NULL
+             WHEN $4 IN ('working', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($5, college_name)
            END,
            branch = CASE
              WHEN $4 = 'studying' THEN $6
-             WHEN $4 = 'working' THEN NULL
+             WHEN $4 IN ('working', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($6, branch)
            END,
            semester = CASE
              WHEN $4 = 'studying' THEN $7
-             WHEN $4 = 'working' THEN NULL
+             WHEN $4 IN ('working', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($7, semester)
            END,
            company_name = CASE
              WHEN $4 = 'working' THEN $8
-             WHEN $4 = 'studying' THEN NULL
+             WHEN $4 IN ('studying', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($8, company_name)
            END,
            designation = CASE
              WHEN $4 = 'working' THEN $9
-             WHEN $4 = 'studying' THEN NULL
+             WHEN $4 IN ('studying', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($9, designation)
            END,
            experience = CASE
              WHEN $4 = 'working' THEN $10
-             WHEN $4 = 'studying' THEN NULL
+             WHEN $4 IN ('studying', 'not_studying_not_working') THEN NULL
              ELSE COALESCE($10, experience)
+           END,
+           description = CASE
+             WHEN $4 = 'not_studying_not_working' THEN $11
+             WHEN $4 IN ('studying', 'working') THEN NULL
+             ELSE COALESCE($11, description)
            END
-       WHERE id = $11
+       WHERE id = $12
        RETURNING id, full_name, email, phone, age, student_type, college_name, branch, semester,
-                 company_name, designation, experience,
+                 company_name, designation, experience, description,
                  active, level, promoted_at, created_at`,
       [
         full_name,
@@ -311,6 +337,7 @@ export const updateStudent = async (req, res) => {
         company_name,
         designation,
         parsedExperience,
+        descriptionValue,
         id,
       ]
     );
@@ -338,7 +365,7 @@ export const setStudentStatus = async (req, res) => {
     const result = await pool.query(
       `UPDATE students SET active = $1 WHERE id = $2
        RETURNING id, full_name, email, phone, age, student_type, college_name, branch, semester,
-                 company_name, designation, experience,
+                 company_name, designation, experience, description,
                  active, level, promoted_at, created_at`,
       [Boolean(active), id]
     );
@@ -397,7 +424,7 @@ export const getStudentDetails = async (req, res) => {
 
     const studentResult = await pool.query(
           `SELECT id, full_name, email, phone, age, student_type, college_name, branch, semester,
-            company_name, designation, experience,
+            company_name, designation, experience, description,
               active, level, promoted_at, created_at
        FROM students WHERE id = $1`,
       [id]
