@@ -1,5 +1,6 @@
 import pool from "../config/db.js";
 import { successResponse, errorResponse } from "../utils/response.js";
+import { promoteEligibleStudents } from "../utils/promotions.js";
 
 const dayNames = [
   "Sunday",
@@ -99,6 +100,44 @@ const getClassIdForDate = async (client, classDate) => {
   return result.rows[0]?.id ?? null;
 };
 
+const refreshStudentActivityStatus = async (client, studentIds) => {
+  const uniqueStudentIds = Array.from(new Set(studentIds.filter(Boolean)));
+  if (uniqueStudentIds.length === 0) return;
+
+  await client.query(
+    `WITH recent_attendance AS (
+       SELECT a.student_id,
+              a.status,
+              ROW_NUMBER() OVER (
+                PARTITION BY a.student_id
+                ORDER BY s.class_date DESC, a.marked_at DESC
+              ) as rn
+       FROM attendance a
+       INNER JOIN class_sessions s ON s.id = a.session_id
+       WHERE a.student_id = ANY($1::uuid[])
+     ),
+     activity AS (
+       SELECT student_id,
+              COUNT(*) FILTER (WHERE rn <= 4) as checked_classes,
+              COUNT(*) FILTER (WHERE rn <= 4 AND status = 'absent') as missed_classes,
+              MAX(CASE WHEN rn = 1 THEN status END) as latest_status
+       FROM recent_attendance
+       WHERE rn <= 4
+       GROUP BY student_id
+     )
+     UPDATE students st
+     SET active = CASE
+       WHEN activity.latest_status = 'present' THEN true
+       WHEN activity.checked_classes = 4 AND activity.missed_classes = 4 THEN false
+       ELSE true
+     END
+     FROM activity
+     WHERE st.id = activity.student_id
+       AND st.level = 1`,
+    [uniqueStudentIds]
+  );
+};
+
 export const createSession = async (req, res) => {
   try {
     const { class_date } = req.body;
@@ -195,7 +234,7 @@ export const markAttendance = async (req, res) => {
 
     const sessionId = sessionResult.rows[0].id;
     const inserted = [];
-    const absentStudentIds = [];
+    const touchedStudentIds = [];
 
     for (const record of records) {
       const { student_id, status } = record;
@@ -220,32 +259,11 @@ export const markAttendance = async (req, res) => {
       );
 
       inserted.push(result.rows[0]);
-      if (status === "absent") {
-        absentStudentIds.push(student_id);
-      }
+      touchedStudentIds.push(student_id);
     }
 
-    if (absentStudentIds.length > 0) {
-      await client.query(
-        `UPDATE students
-         SET active = false
-         WHERE id = ANY($1::uuid[])
-           AND active = true
-           AND level = 1`,
-        [absentStudentIds]
-      );
-    }
-
-    if (absentStudentIds.length > 0) {
-      await client.query(
-        `UPDATE students
-         SET active = false
-         WHERE id = ANY($1::uuid[])
-           AND active = true
-           AND level = 1`,
-        [absentStudentIds]
-      );
-    }
+    await refreshStudentActivityStatus(client, touchedStudentIds);
+    await promoteEligibleStudents(client);
 
     await client.query("COMMIT");
 
@@ -257,8 +275,6 @@ export const markAttendance = async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Mark attendance error:", error);
-
-      await promoteEligibleStudents(client);
     errorResponse(res, "Failed to mark attendance", 500);
   } finally {
     client.release();

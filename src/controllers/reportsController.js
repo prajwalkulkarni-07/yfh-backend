@@ -2,23 +2,74 @@ import pool from "../config/db.js";
 import { successResponse, errorResponse } from "../utils/response.js";
 import { promoteEligibleStudents } from "../utils/promotions.js";
 
+const CLASS_ROTATION = [
+  "Self Management",
+  "Yoga",
+  "Relationship",
+  "Karma",
+  "Diet For Happiness",
+  "Habits For Happiness",
+  "The Perfect Knowledge",
+  "The Real Freedom",
+];
+
+const ensureClasses = async () => {
+  for (let i = 0; i < CLASS_ROTATION.length; i += 1) {
+    await pool.query(
+      `INSERT INTO classes (name, order_index)
+       VALUES ($1, $2)
+       ON CONFLICT (name)
+       DO UPDATE SET order_index = EXCLUDED.order_index`,
+      [CLASS_ROTATION[i], i + 1]
+    );
+  }
+};
+
+const syncActivityStatus = async () => {
+  await pool.query(
+    `WITH recent_attendance AS (
+       SELECT a.student_id,
+              a.status,
+              ROW_NUMBER() OVER (
+                PARTITION BY a.student_id
+                ORDER BY s.class_date DESC, a.marked_at DESC
+              ) as rn
+       FROM attendance a
+       INNER JOIN class_sessions s ON s.id = a.session_id
+     ),
+     activity AS (
+       SELECT student_id,
+              COUNT(*) FILTER (WHERE rn <= 4) as checked_classes,
+              COUNT(*) FILTER (WHERE rn <= 4 AND status = 'absent') as missed_classes,
+              MAX(CASE WHEN rn = 1 THEN status END) as latest_status
+       FROM recent_attendance
+       WHERE rn <= 4
+       GROUP BY student_id
+     )
+     UPDATE students st
+     SET active = CASE
+       WHEN activity.checked_classes = 4 AND activity.missed_classes = 4 THEN false
+       ELSE true
+     END
+     FROM students target
+     LEFT JOIN activity ON activity.student_id = target.id
+     WHERE st.id = target.id
+       AND st.level = 1`
+  );
+};
+
+const prepareReports = async () => {
+  await ensureClasses();
+  await syncActivityStatus();
+  await promoteEligibleStudents(pool);
+};
+
 export const getInactiveReport = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
-      `WITH latest_session AS (
-         SELECT id, class_date
-         FROM class_sessions
-         ORDER BY class_date DESC
-         LIMIT 1
-       ),
-       latest_attendance AS (
-         SELECT a.student_id, a.status
-         FROM attendance a
-         INNER JOIN latest_session ls ON ls.id = a.session_id
-       ),
-       last_present AS (
+      `WITH last_present AS (
          SELECT a.student_id,
                 s.class_date::text as class_date,
                 c.name as class_name,
@@ -37,12 +88,10 @@ export const getInactiveReport = async (_req, res) => {
               lp.class_name,
               lp.class_date
        FROM students st
-       CROSS JOIN latest_session ls
-       LEFT JOIN latest_attendance la ON la.student_id = st.id
        LEFT JOIN last_present lp
          ON lp.student_id = st.id
         AND lp.rn = 1
-       WHERE COALESCE(la.status, 'absent') <> 'present'
+       WHERE st.active = false
          AND st.level = 1
        ORDER BY st.full_name ASC`
     );
@@ -54,9 +103,11 @@ export const getInactiveReport = async (_req, res) => {
   }
 };
 
-export const getEligibleReport = async (_req, res) => {
+export const getEligibleReport = async (req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
+    const status = req.query.status === "not_eligible" ? "not_eligible" : "eligible";
+    const comparator = status === "eligible" ? ">=" : "<";
 
     const result = await pool.query(
       `SELECT st.id,
@@ -71,7 +122,7 @@ export const getEligibleReport = async (_req, res) => {
        LEFT JOIN classes c ON c.id = s.class_id
        WHERE st.level = 1
        GROUP BY st.id, st.full_name, st.phone
-       HAVING COUNT(DISTINCT c.id) >= 1
+       HAVING COUNT(DISTINCT c.id) ${comparator} 4
        ORDER BY st.full_name ASC`
     );
 
@@ -84,7 +135,7 @@ export const getEligibleReport = async (_req, res) => {
 
 export const getPromotedReport = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
       `WITH completed_classes AS (
@@ -134,10 +185,15 @@ export const getPromotedReport = async (_req, res) => {
 
 export const getReportByClass = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
-      `WITH attended AS (
+      `WITH all_level_1_students AS (
+         SELECT id, full_name, phone
+         FROM students
+         WHERE level = 1
+       ),
+       attended AS (
          SELECT DISTINCT a.student_id, c.id as class_id
          FROM attendance a
          INNER JOIN class_sessions s ON s.id = a.session_id
@@ -155,16 +211,14 @@ export const getReportByClass = async (_req, res) => {
                     'phone', st.phone
                   )
                   ORDER BY LOWER(st.full_name), st.full_name
-                ) FILTER (WHERE st.id IS NOT NULL),
+                ) FILTER (WHERE st.id IS NOT NULL AND at.student_id IS NULL),
                 '[]'::json
               ) as students
        FROM classes c
-       CROSS JOIN students st
+       CROSS JOIN all_level_1_students st
        LEFT JOIN attended at
          ON at.student_id = st.id
         AND at.class_id = c.id
-       WHERE st.level = 1
-         AND at.student_id IS NULL
        GROUP BY c.id, c.name, c.order_index
        ORDER BY c.order_index ASC`
     );
@@ -178,7 +232,7 @@ export const getReportByClass = async (_req, res) => {
 
 export const getAllStudentsReport = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
       `WITH class_attendance AS (
@@ -240,12 +294,11 @@ export const getAllStudentsReport = async (_req, res) => {
 
 export const getYetToAttendTripReport = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
       `WITH completed_classes AS (
-         SELECT a.student_id,
-                COUNT(DISTINCT c.id) as attended_classes
+         SELECT a.student_id, COUNT(DISTINCT c.id) as attended_classes
          FROM attendance a
          INNER JOIN class_sessions s ON s.id = a.session_id
          INNER JOIN classes c ON c.id = s.class_id
@@ -279,33 +332,20 @@ export const getYetToAttendTripReport = async (_req, res) => {
 
 export const getYetToVolunteerReport = async (_req, res) => {
   try {
-    await promoteEligibleStudents(pool);
+    await prepareReports();
 
     const result = await pool.query(
-      `WITH completed_classes AS (
-         SELECT a.student_id,
-                COUNT(DISTINCT c.id) as attended_classes
-         FROM attendance a
-         INNER JOIN class_sessions s ON s.id = a.session_id
-         INNER JOIN classes c ON c.id = s.class_id
-         WHERE a.status = 'present'
-         GROUP BY a.student_id
-         HAVING COUNT(DISTINCT c.id) >= 4
-       ),
-       volunteered AS (
+      `WITH volunteered AS (
          SELECT DISTINCT vp.student_id
          FROM volunteering_participants vp
          INNER JOIN volunteering_services vs ON vs.id = vp.service_id
        )
        SELECT st.id,
               st.full_name,
-              st.phone,
-              cc.attended_classes
+              st.phone
        FROM students st
-       INNER JOIN completed_classes cc ON cc.student_id = st.id
        LEFT JOIN volunteered v ON v.student_id = st.id
-       WHERE st.level = 1
-         AND v.student_id IS NULL
+       WHERE v.student_id IS NULL
        ORDER BY st.full_name ASC`
     );
 

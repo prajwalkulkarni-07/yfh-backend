@@ -52,8 +52,7 @@ export const promoteEligibleStudents = async (client) => {
      )
      UPDATE students
      SET level = 2,
-         promoted_at = COALESCE(promoted_at, NOW()),
-         active = false
+         promoted_at = COALESCE(promoted_at, NOW())
      WHERE id IN (SELECT student_id FROM eligible)
        AND level < 2`
   );

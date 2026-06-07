@@ -27,6 +27,39 @@ const ensureClasses = async () => {
   }
 };
 
+const syncActivityStatus = async () => {
+  await pool.query(
+    `WITH recent_attendance AS (
+       SELECT a.student_id,
+              a.status,
+              ROW_NUMBER() OVER (
+                PARTITION BY a.student_id
+                ORDER BY s.class_date DESC, a.marked_at DESC
+              ) as rn
+       FROM attendance a
+       INNER JOIN class_sessions s ON s.id = a.session_id
+     ),
+     activity AS (
+       SELECT student_id,
+              COUNT(*) FILTER (WHERE rn <= 4) as checked_classes,
+              COUNT(*) FILTER (WHERE rn <= 4 AND status = 'absent') as missed_classes,
+              MAX(CASE WHEN rn = 1 THEN status END) as latest_status
+       FROM recent_attendance
+       WHERE rn <= 4
+       GROUP BY student_id
+     )
+     UPDATE students st
+     SET active = CASE
+       WHEN activity.checked_classes = 4 AND activity.missed_classes = 4 THEN false
+       ELSE true
+     END
+     FROM students target
+     LEFT JOIN activity ON activity.student_id = target.id
+     WHERE st.id = target.id
+       AND st.level = 1`
+  );
+};
+
 export const createStudent = async (req, res) => {
   try {
     const {
@@ -142,8 +175,10 @@ export const createStudent = async (req, res) => {
 
 export const getStudents = async (req, res) => {
   try {
-    const { active, include_promoted } = req.query;
+    const { active, include_promoted, eligible_for_trip } = req.query;
 
+    await ensureClasses();
+    await syncActivityStatus();
     await promoteEligibleStudents(pool);
 
     const params = [];
@@ -156,6 +191,16 @@ export const getStudents = async (req, res) => {
 
     if (include_promoted !== "true") {
       where += " AND level = 1";
+    }
+
+    if (eligible_for_trip === "true") {
+      where += ` AND (
+        SELECT COUNT(DISTINCT c.id)
+        FROM attendance a
+        INNER JOIN class_sessions s ON s.id = a.session_id
+        INNER JOIN classes c ON c.id = s.class_id
+        WHERE a.student_id = students.id AND a.status = 'present'
+      ) >= 4`;
     }
 
     const result = await pool.query(

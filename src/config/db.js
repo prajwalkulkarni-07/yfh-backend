@@ -10,10 +10,9 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false,
   },
-});
-
-pool.on("connect", () => {
-  console.log("Connected to Supabase");
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
 pool.on("error", (err) => {
